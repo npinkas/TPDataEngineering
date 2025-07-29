@@ -1,0 +1,13 @@
+# Ignorar entorno virtual
+tpIntegrador/
+
+# Ignorar cachés de Python
+__pycache__/
+*.py[cod]
+
+# Ignorar configuración local de VS Code
+.vscode/
+
+# Ignorar archivos de sistema o temporales
+*.log
+*.tmp
