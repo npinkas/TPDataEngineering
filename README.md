@@ -1,3 +1,3 @@
 # TPDataEngineering
 
-## Entrega 1: [Ver 1er entrega](docs\1 - Extracción y almacenamiento.pdf)
+## [1era Entrega: Extracción y almacenamiento](docs/1-Extraccion-almacenamiento.pdf)
