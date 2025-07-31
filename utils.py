@@ -1,8 +1,9 @@
 import requests
 import pandas as pd
 import json
+from datetime import datetime, timezone
 
-def obtenerDatosMonedas(url, params=None):
+def obtenerDatosEstaciones(url, params=None):
     
     try:
         response = requests.get(url,params=params, timeout = 10)
@@ -12,7 +13,7 @@ def obtenerDatosMonedas(url, params=None):
         
     except requests.exceptions.RequestException as e:
         print(f"Error al obtener los datos. Código de error: {e}")
-        return None
+        return pd.DataFrame()
 
 def crearDataFrame(json_data):
 
@@ -22,7 +23,7 @@ def crearDataFrame(json_data):
     
     except Exception as e:
         print(f"Se produjo un error en la construcción del DataFrame: {e}")   
-        return None 
+        return pd.DataFrame() 
 
 
 # Extracción incremental
@@ -57,43 +58,45 @@ def updateLastUpdate (file_path, last_updated):
 
     try:
         with open(file_path, "w") as file:
-            json.dump({"last_updated": str(last_updated)}, file, default=str, indent=4)
+            json.dump({"last_updated": last_updated.isoformat()}, file, indent=4)
     
     except FileNotFoundError:
         raise FileNotFoundError(f"El archivo JSON en la ruta {file_path} no existe.") # propago el error y lo resuelvo en otro lado!
     
     
-
-
-
-
 def extraccionIncremental(url, file_path, params=None):
 
     try:
 
         ultimo_updateJson = getLastUpdate(file_path=file_path)
-        ultimo_update = pd.to_datetime(ultimo_updateJson).tz_convert("UTC")
+        ultimo_update = pd.to_datetime(ultimo_updateJson, utc=True)
 
-        df = obtenerDatosMonedas(url, params=params)
+        df = obtenerDatosEstaciones(url, params=params)
         if df is None:
             print("No se pudo construir el DataFrame.")
-            return
+            return pd.DataFrame()
 
-        df["last_updated"] = pd.to_datetime(df["last_updated"])
-
-        df_incremental = df[df["last_updated"] > ultimo_update]
+        fechas_convertidas = []
+        for f in df["last_update"]:
+            ft = datetime.fromtimestamp(f / 1000, tz=timezone.utc)
+            fechas_convertidas.append(ft)
         
-        if not df_incremental.empty:
+        df["last_update"] = fechas_convertidas
+       
+        df_incremental = df[df["last_update"] > ultimo_update]
 
-            updateLastUpdate(file_path=file_path, last_updated=max(df["last_updated"]))
+        if df_incremental.empty:
+            print("No hay nuevas actualizaciones desde la última consulta")
+            return pd.DataFrame()
 
-            return df_incremental
-        
-        return pd.DataFrame()
+        max_timestamp = df["last_update"].max()
+        updateLastUpdate(file_path=file_path, last_updated=max_timestamp)
+        return df_incremental
 
     except Exception as e:
-
         print(f"Se produjo un error en la extracción incremental {e}")
+        return pd.DataFrame()
+
 
 
 

@@ -1,15 +1,25 @@
 import utils
+from configparser import ConfigParser
 
 def main ():
 
-       
-    urlBase = "https://api.coingecko.com/api/v3"
+    parser = ConfigParser()
+    parser.read("pipeline.conf")
+    api_key = parser["api-credentials"]["api-key"]         
+    
+    urlBase = "https://api.jcdecaux.com/vls/v1"
 
-    endpointDinamico = "coins/markets"
+    endpointDinamico = "stations"
+    
     paramsDinamico = {
-        "vs_currency": "usd"
+        "contract": "lyon",
+        "apiKey" : api_key
     }
-    endpointEstatico = "coins/list"
+
+    paramsEstatico = {
+        "apiKey" : api_key
+    }
+    endpointEstatico = "contracts"
 
     urlDinamica= f"{urlBase}/{endpointDinamico}"
     urlEstatica = f"{urlBase}/{endpointEstatico}"
@@ -17,7 +27,7 @@ def main ():
     data_dinamico = utils.extraccionIncremental(urlDinamica, "metadata/metadata.json", paramsDinamico)
     print(data_dinamico.head())
     
-    print(utils.obtenerDatosMonedas(urlEstatica).head())
+    print(utils.obtenerDatosEstaciones(urlEstatica, paramsEstatico).head())
 
 
 if __name__ == "__main__":
