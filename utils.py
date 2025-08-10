@@ -1,41 +1,15 @@
 import requests
 import pandas as pd
 import json
+import pyarrow as pa
+import math
 from datetime import datetime, timezone
+from deltalake import write_deltalake, DeltaTable
+from deltalake.exceptions import TableNotFoundError
 
-def obtenerDatosEstaciones(url, params=None):
-    
-    try:
-        response = requests.get(url,params=params, timeout = 10)
-        response.raise_for_status() # excepcion que captura el except
-        data = response.json()
-        return crearDataFrame(data)
-        
-    except requests.exceptions.RequestException as e:
-        print(f"Error al obtener los datos. Código de error: {e}")
-        return pd.DataFrame()
+# Manejo de json
 
-def crearDataFrame(json_data):
-
-    try:
-        df = pd.json_normalize(json_data) #lo convierto en un dataframe
-        return df
-    
-    except Exception as e:
-        print(f"Se produjo un error en la construcción del DataFrame: {e}")   
-        return pd.DataFrame() 
-
-
-# Extracción incremental
-"""
-1. Leer el json y obtener el last update
-2. Transformar el last update a datetime para poder comparar 
-3. Obtener el lastupdate del json de la api y transformarlo a datetime
-4. Traer todo lo que sea mayor al last update
-5. Actualizar el last update
-"""
-
-def getLastUpdate (file_path):
+def get_last_update (file_path):
 
     try:
         #with es util porque permite simplificar el manejo de archivos, conexiones, db al asegurarse que se usan y liberan de forma correcta, incluso si hay errores.
@@ -54,7 +28,7 @@ def getLastUpdate (file_path):
         raise KeyError(str(k))
 
 
-def updateLastUpdate (file_path, last_updated):
+def update_last_update (file_path, last_updated):
 
     try:
         with open(file_path, "w") as file:
@@ -63,26 +37,52 @@ def updateLastUpdate (file_path, last_updated):
     except FileNotFoundError:
         raise FileNotFoundError(f"El archivo JSON en la ruta {file_path} no existe.") # propago el error y lo resuelvo en otro lado!
     
+# Extraccion de datos
+
+def get_data_stations(url, params=None):
     
-def extraccionIncremental(url, file_path, params=None):
+    try:
+        response = requests.get(url,params=params, timeout = 10)
+        response.raise_for_status() # excepcion que captura el except
+        data = response.json()
+        return create_data_frame(data)
+        
+    except requests.exceptions.RequestException as e:
+        print(f"Error al obtener los datos. Código de error: {e}")
+        return pd.DataFrame()
+
+def create_data_frame(json_data):
+
+    try:
+        df = pd.json_normalize(json_data)
+        return df
+    
+    except Exception as e:
+        print(f"Se produjo un error en la construcción del DataFrame: {e}")   
+        return pd.DataFrame() 
+    
+def incremental_extraction(url, file_path, params=None):
 
     try:
 
-        ultimo_updateJson = getLastUpdate(file_path=file_path)
+        ultimo_updateJson = get_last_update(file_path=file_path)
         ultimo_update = pd.to_datetime(ultimo_updateJson, utc=True)
 
-        df = obtenerDatosEstaciones(url, params=params)
+        df = get_data_stations(url, params=params)
         if df is None:
             print("No se pudo construir el DataFrame.")
             return pd.DataFrame()
-
+        
         fechas_convertidas = []
         for f in df["last_update"]:
-            ft = datetime.fromtimestamp(f / 1000, tz=timezone.utc)
-            fechas_convertidas.append(ft)
-        
+            if f is not None and not math.isnan(f):
+                ft = datetime.fromtimestamp(f / 1000, tz=timezone.utc)
+                fechas_convertidas.append(ft)
+            else:
+                fechas_convertidas.append(pd.NaT) #fecha nula en caso de ser null
+            
         df["last_update"] = fechas_convertidas
-       
+
         df_incremental = df[df["last_update"] > ultimo_update]
 
         if df_incremental.empty:
@@ -90,7 +90,7 @@ def extraccionIncremental(url, file_path, params=None):
             return pd.DataFrame()
 
         max_timestamp = df["last_update"].max()
-        updateLastUpdate(file_path=file_path, last_updated=max_timestamp)
+        update_last_update(file_path=file_path, last_updated=max_timestamp)
         return df_incremental
 
     except Exception as e:
@@ -98,12 +98,48 @@ def extraccionIncremental(url, file_path, params=None):
         return pd.DataFrame()
 
 
+# Almacenamiento de datos
 
+def save_data_as_delta(df, path, mode="overwrite", partition_cols=None):
 
+    write_deltalake(path, df, mode = mode, partition_by = partition_cols)
 
+def merge_new_data_as_delta(data, data_path, predicate):
 
+    try:
+        dt = DeltaTable(data_path)
+        data_pa = pa.Table.from_pandas(data)
+        dt.merge(
+            source=data_pa,
+            source_alias="source",
+            target_alias="target",
+            predicate=predicate
+        ) \
+        .when_matched_update_all() \
+        .when_not_matched_insert_all() \
+        .execute()
+    except TableNotFoundError:
+        save_data_as_delta(data, data_path)
+    
+def save_new_data_as_delta(new_data, data_path, predicate, partition_cols=None):
+   
+    try:
+      dt = DeltaTable(data_path)
+      new_data_pa = pa.Table.from_pandas(new_data)
 
+      # Se insertan en target, datos de source que no existen en target
+      dt.merge(
+          source=new_data_pa,
+          source_alias="source",
+          target_alias="target",
+          predicate=predicate
+      ) \
+      .when_not_matched_insert_all() \
+      .execute()
 
+    # Si no existe la tabla Delta Lake, se guarda como nueva
+    except TableNotFoundError:
+      save_data_as_delta(new_data, data_path, partition_cols=partition_cols)
 
 
 

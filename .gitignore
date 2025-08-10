@@ -7,7 +7,14 @@ __pycache__/
 
 # Ignorar configuración local de VS Code
 .vscode/
+.docs/
 
 # Ignorar archivos de sistema o temporales
 *.log
 *.tmp
+
+# Ignorar .config
+*.conf
+
+# Ignorar carpeta datalake
+datalake/bronze/
